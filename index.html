@@ -58,6 +58,7 @@
   .tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; }
   .tools button { flex: 1 1 auto; }
   .sug { font-size: 12px; padding: 6px 8px; white-space: nowrap; color: var(--accent); border-color: var(--accent); background: transparent; }
+  .sug.on { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 16px; line-height: 1.5; }
 </style>
 </head>
@@ -141,6 +142,11 @@ function sugBtn(item) {
     item.qty = s; save(); render();
   }});
 }
+function wornBtn(item) {
+  return el('button', { class: 'sug' + (item.worn ? ' on' : ''), text: item.worn ? 'Puesto ✓' : 'Lo llevo puesto', onclick: () => {
+    item.worn = !item.worn; save(); render();
+  }});
+}
 function applySuggestions() {
   state.categories.forEach(c => c.items.forEach(i => {
     const s = suggestion(i);
@@ -172,7 +178,8 @@ function render() {
   const app = document.getElementById('app');
   app.replaceChildren();
 
-  const all = state.categories.flatMap(c => c.items);
+  // Lo que llevas puesto no cuenta para el progreso de empaquetado
+  const all = state.categories.flatMap(c => c.items).filter(i => !i.worn);
   const done = all.filter(i => i.packed).length;
   const pct = all.length ? Math.round(done / all.length * 100) : 0;
 
@@ -222,7 +229,13 @@ function render() {
 }
 
 function renderCategory(cat) {
-  const list = el('div', { class: 'card' }, el('h2', { text: cat.name }));
+  let title = cat.name;
+  if (cat.id === 'ropa') {
+    const worn = cat.items.filter(i => i.worn).reduce((s, i) => s + (i.qty || 0), 0);
+    const inCase = cat.items.filter(i => !i.worn).reduce((s, i) => s + (i.qty || 0), 0);
+    title = `${cat.name} · ${inCase} en la maleta · ${worn} puestas`;
+  }
+  const list = el('div', { class: 'card' }, el('h2', { text: title }));
   for (const item of cat.items) {
     const row = el('div', { class: 'item' + (item.packed ? ' packed' : '') },
       el('input', { type: 'checkbox', checked: item.packed, 'aria-label': 'Empaquetado', onchange: e => {
@@ -239,6 +252,7 @@ function renderCategory(cat) {
           item.qty = Math.max(0, parseInt(e.target.value, 10) || 0); save();
         }}),
         sugBtn(item),
+        cat.id === 'ropa' ? wornBtn(item) : null,
         el('input', { type: 'text', value: item.where, placeholder: 'Dónde (maleta, bolsillo…)', 'aria-label': 'Dónde', onchange: e => {
           item.where = e.target.value; save();
         }})
