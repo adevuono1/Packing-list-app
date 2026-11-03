@@ -28,7 +28,8 @@
          env(safe-area-inset-bottom, 0px) max(16px, env(safe-area-inset-left, 0px)); }
   main { max-width: 640px; margin: 0 auto; padding-block: 16px 48px; }
   h1 { font-size: 28px; margin: 4px 0 12px; letter-spacing: -0.02em; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 4px; }
+  .summary { font-size: 12px; color: var(--muted); margin: 0 0 8px; line-height: 1.5; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
   label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); flex: 1; min-width: 0; }
   input { font: inherit; color: var(--fg); background: transparent; border: 1px solid var(--line);
@@ -40,25 +41,26 @@
   .track { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; }
   .bar { height: 100%; background: var(--accent); transition: width .2s; }
   .progress span { display: block; font-size: 13px; color: var(--muted); margin-top: 6px; }
-  .item { display: grid; grid-template-columns: 28px 1fr 64px; gap: 8px; align-items: center;
-    padding: 8px 0; border-top: 1px solid var(--line); }
+  .item { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; align-items: center;
+    padding: 10px 0; border-top: 1px solid var(--line); }
   .item:first-of-type { border-top: 0; }
-  .item .where { grid-column: 2 / 3; }
-  .item .meta { grid-column: 2 / 4; display: flex; gap: 8px; }
-  .item .meta input { padding: 6px 8px; font-size: 14px; }
-  input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent); margin: 0; }
   .packed .name { text-decoration: line-through; color: var(--muted); }
   .name { border: 0; padding: 4px 0; font-size: 16px; }
-  .qty { text-align: center; }
-  .del { background: none; border: 0; color: var(--danger); font: inherit; font-size: 13px; padding: 4px; justify-self: end; }
+  input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent); margin: 0; }
+  .bags { grid-column: 2 / 4; display: flex; flex-wrap: wrap; gap: 8px; }
+  .bagf { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 2px; }
+  .bagf input { width: 84px; padding: 6px 8px; font-size: 14px; text-align: center; }
+  .meta { grid-column: 2 / 4; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .total { font-size: 13px; color: var(--muted); margin-left: auto; }
+  .del { background: none; border: 0; color: var(--danger); font: inherit; font-size: 13px; padding: 4px; }
   form.add { display: flex; gap: 8px; margin-top: 10px; }
   button { font: inherit; border-radius: 10px; border: 1px solid var(--line); background: var(--card);
     color: var(--fg); padding: 10px 14px; cursor: pointer; }
   button.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; font-weight: 600; }
-  .tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; }
-  .tools button { flex: 1 1 auto; }
   .sug { font-size: 12px; padding: 6px 8px; white-space: nowrap; color: var(--accent); border-color: var(--accent); background: transparent; }
   .sug.on { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; }
+  .tools button { flex: 1 1 auto; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 16px; line-height: 1.5; }
 </style>
 </head>
@@ -66,12 +68,13 @@
 <main id="app"></main>
 <script>
 const KEY = 'packing-list-v1';
+const DEFAULT_BAGS = ['Carry-on', 'Facturada', 'Personal item'];
 
 let uidCounter = 0;
 function uid() { return 'i' + Date.now().toString(36) + (++uidCounter); }
 
 const seed = {
-  trip: { destination: '', days: 5, luggage: 'Carry-on + personal' },
+  trip: { destination: '', days: 5, bags: [...DEFAULT_BAGS] },
   categories: [
     { id: 'ropa', name: 'Ropa', items: [
       ['Camisetas', 4], ['Pantalones', 3], ['Ropa interior', 6], ['Calcetines', 6],
@@ -89,21 +92,8 @@ const seed = {
       ['Báscula de equipaje', 1], ['Adaptador Américas', 1], ['Adaptador Europa', 1]
     ]}
   ].map(c => ({ id: c.id, name: c.name, items: c.items.map(([name, qty]) => ({
-    id: uid(), name, qty, where: '', packed: false })) }))
+    id: uid(), name, qty, packed: false, worn: false })) }))
 };
-
-function load() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {}
-  return structuredClone(seed);
-}
-function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
-}
-
-let state = load();
 
 // Recomendaciones según el número de días
 const RULES = {
@@ -119,40 +109,52 @@ const RULE_BY_NAME = {
   'Calcetines': 'calcetines', 'Pijama': 'pijama', 'Chaquetas': 'chaquetas'
 };
 
-// Migración: asigna reglas a objetos existentes y añade Chaquetas si falta
-state.categories.forEach(c => c.items.forEach(i => {
-  if (!i.rule && RULE_BY_NAME[i.name]) i.rule = RULE_BY_NAME[i.name];
-}));
-{
-  const ropa = state.categories.find(c => c.id === 'ropa');
+// Convierte cualquier estado (nuevo, guardado o importado) al formato actual
+function normalize(s) {
+  s.trip = s.trip || {};
+  if (!Array.isArray(s.trip.bags) || !s.trip.bags.length) s.trip.bags = [...DEFAULT_BAGS];
+  const bag0 = s.trip.bags[0];
+  s.categories.forEach(c => c.items.forEach(i => {
+    if (!i.split) {
+      i.split = {};
+      if (i.qty) i.split[bag0] = i.qty;   // datos antiguos: todo va a la primera maleta
+    }
+    delete i.qty;
+    delete i.where;
+    i.worn = !!i.worn;
+    i.packed = !!i.packed;
+    if (!i.rule && RULE_BY_NAME[i.name]) i.rule = RULE_BY_NAME[i.name];
+  }));
+  const ropa = s.categories.find(c => c.id === 'ropa');
   if (ropa && !ropa.items.some(i => i.rule === 'chaquetas')) {
-    ropa.items.push({ id: uid(), name: 'Chaquetas', qty: 0, where: '', packed: false, rule: 'chaquetas' });
+    ropa.items.push({ id: uid(), name: 'Chaquetas', split: {}, worn: false, packed: false, rule: 'chaquetas' });
   }
+  return s;
 }
 
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return structuredClone(seed);
+}
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+let state = normalize(load());
+
+// Helpers de cuentas
+function bags() { return state.trip.bags; }
+function bagCount(item, bag) { return Math.max(0, parseInt(item.split?.[bag], 10) || 0); }
+function inBags(item) { return bags().reduce((s, b) => s + bagCount(item, b), 0); }
+function wornUnits(item) { return item.worn ? 1 : 0; }
+function totalOf(item) { return inBags(item) + wornUnits(item); }
 function daysCount() { return Math.max(0, parseInt(state.trip.days, 10) || 0); }
 function suggestion(item) {
   const fn = item.rule && RULES[item.rule];
   return fn ? fn(daysCount()) : null;
-}
-function sugBtn(item) {
-  const s = suggestion(item);
-  if (s === null) return null;
-  return el('button', { class: 'sug', text: `Sugerido ${s}`, onclick: () => {
-    item.qty = s; save(); render();
-  }});
-}
-function wornBtn(item) {
-  return el('button', { class: 'sug' + (item.worn ? ' on' : ''), text: item.worn ? 'Puesto ✓' : 'Lo llevo puesto', onclick: () => {
-    item.worn = !item.worn; save(); render();
-  }});
-}
-function applySuggestions() {
-  state.categories.forEach(c => c.items.forEach(i => {
-    const s = suggestion(i);
-    if (s !== null) i.qty = s;
-  }));
-  save(); render();
 }
 
 function el(tag, props = {}, ...kids) {
@@ -178,8 +180,8 @@ function render() {
   const app = document.getElementById('app');
   app.replaceChildren();
 
-  // Lo que llevas puesto no cuenta para el progreso de empaquetado
-  const all = state.categories.flatMap(c => c.items).filter(i => !i.worn);
+  // Progreso: solo objetos que van en alguna maleta
+  const all = state.categories.flatMap(c => c.items).filter(i => inBags(i) > 0);
   const done = all.filter(i => i.packed).length;
   const pct = all.length ? Math.round(done / all.length * 100) : 0;
 
@@ -189,7 +191,11 @@ function render() {
       field('Destino', state.trip.destination, v => { state.trip.destination = v; save(); }, 'text', 'Ej.: Lisboa'),
       el('div', { class: 'row2', style: 'margin-top:10px' },
         field('Días', state.trip.days, v => { state.trip.days = v; save(); render(); }, 'number'),
-        field('Equipaje', state.trip.luggage, v => { state.trip.luggage = v; save(); }, 'text', 'Ej.: Maleta grande')
+        field('Maletas', bags().join(', '), v => {
+          const arr = v.split(',').map(s => s.trim()).filter(Boolean);
+          state.trip.bags = arr.length ? arr : [...DEFAULT_BAGS];
+          save(); render();
+        }, 'text', 'Carry-on, Facturada…')
       )
     ),
     el('div', { class: 'progress' },
@@ -205,8 +211,7 @@ function render() {
       el('h2', { text: 'Nueva categoría' }),
       el('form', { class: 'add', onsubmit: e => {
         e.preventDefault();
-        const input = e.target.elements.name;
-        const name = input.value.trim();
+        const name = e.target.elements.name.value.trim();
         if (!name) return;
         state.categories.push({ id: uid(), name, items: [] });
         save(); render();
@@ -216,11 +221,11 @@ function render() {
       )
     ),
     el('div', { class: 'tools' },
+      el('button', { text: 'Aplicar sugerencias', onclick: applySuggestions }),
       el('button', { text: 'Desmarcar todo', onclick: () => {
-        state.categories.forEach(c => c.items.forEach(i => i.packed = false));
+        state.categories.forEach(c => c.items.forEach(i => { i.packed = false; i.worn = false; }));
         save(); render();
       }}),
-      el('button', { text: 'Aplicar sugerencias', onclick: applySuggestions }),
       el('button', { text: 'Exportar copia', onclick: exportData }),
       importButton()
     ),
@@ -229,13 +234,16 @@ function render() {
 }
 
 function renderCategory(cat) {
-  let title = cat.name;
-  if (cat.id === 'ropa') {
-    const worn = cat.items.filter(i => i.worn).reduce((s, i) => s + (i.qty || 0), 0);
-    const inCase = cat.items.filter(i => !i.worn).reduce((s, i) => s + (i.qty || 0), 0);
-    title = `${cat.name} · ${inCase} en la maleta · ${worn} puestas`;
-  }
-  const list = el('div', { class: 'card' }, el('h2', { text: title }));
+  const counts = bags().map(b => `${b} ${cat.items.reduce((s, i) => s + bagCount(i, b), 0)}`);
+  const worn = cat.items.filter(i => i.worn).length;
+  const total = cat.items.reduce((s, i) => s + totalOf(i), 0);
+  const summary = [...counts, ...(worn ? [`Puestas ${worn}`] : []), `Total ${total}`].join(' · ');
+
+  const list = el('div', { class: 'card' },
+    el('h2', { text: cat.name }),
+    el('p', { class: 'summary', text: summary })
+  );
+
   for (const item of cat.items) {
     const row = el('div', { class: 'item' + (item.packed ? ' packed' : '') },
       el('input', { type: 'checkbox', checked: item.packed, 'aria-label': 'Empaquetado', onchange: e => {
@@ -247,31 +255,57 @@ function renderCategory(cat) {
       el('button', { class: 'del', text: 'Borrar', onclick: () => {
         cat.items = cat.items.filter(i => i !== item); save(); render();
       }}),
+      el('div', { class: 'bags' }, ...bags().map(b =>
+        el('label', { class: 'bagf' }, b,
+          el('input', { type: 'number', min: '0', value: bagCount(item, b), 'aria-label': `${item.name} en ${b}`, onchange: e => {
+            item.split = { ...(item.split || {}), [b]: Math.max(0, parseInt(e.target.value, 10) || 0) };
+            save(); render();
+          }})
+        )
+      )),
       el('div', { class: 'meta' },
-        el('input', { type: 'number', min: '0', class: 'qty', value: item.qty, 'aria-label': 'Cantidad', style: 'width:64px', onchange: e => {
-          item.qty = Math.max(0, parseInt(e.target.value, 10) || 0); save();
-        }}),
         sugBtn(item),
         cat.id === 'ropa' ? wornBtn(item) : null,
-        el('input', { type: 'text', value: item.where, placeholder: 'Dónde (maleta, bolsillo…)', 'aria-label': 'Dónde', onchange: e => {
-          item.where = e.target.value; save();
-        }})
+        el('span', { class: 'total', text: `Total ${totalOf(item)}` })
       )
     );
     list.append(row);
   }
+
   list.append(el('form', { class: 'add', onsubmit: e => {
     e.preventDefault();
-    const input = e.target.elements.name;
-    const name = input.value.trim();
+    const name = e.target.elements.name.value.trim();
     if (!name) return;
-    cat.items.push({ id: uid(), name, qty: 1, where: '', packed: false });
+    cat.items.push({ id: uid(), name, split: {}, worn: false, packed: false });
     save(); render();
   }},
     el('input', { name: 'name', placeholder: 'Añadir objeto', 'aria-label': 'Añadir objeto' }),
     el('button', { type: 'submit', text: 'Añadir' })
   ));
   return list;
+}
+
+function sugBtn(item) {
+  const s = suggestion(item);
+  if (s === null) return null;
+  return el('button', { class: 'sug', text: `Sugerido ${s}`, onclick: () => {
+    item.split = { [bags()[0]]: Math.max(0, s - wornUnits(item)) };
+    save(); render();
+  }});
+}
+
+function wornBtn(item) {
+  return el('button', { class: 'sug' + (item.worn ? ' on' : ''), text: item.worn ? 'Puesto ✓' : 'Lo llevo puesto', onclick: () => {
+    item.worn = !item.worn; save(); render();
+  }});
+}
+
+function applySuggestions() {
+  state.categories.forEach(c => c.items.forEach(i => {
+    const s = suggestion(i);
+    if (s !== null) i.split = { [bags()[0]]: Math.max(0, s - wornUnits(i)) };
+  }));
+  save(); render();
 }
 
 function exportData() {
@@ -293,7 +327,7 @@ function importButton() {
       try {
         const data = JSON.parse(reader.result);
         if (!data || !Array.isArray(data.categories)) throw new Error('formato');
-        state = data;
+        state = normalize(data);
         save(); render();
       } catch (err) {
         alert('Ese archivo no es una copia válida de la lista.');
