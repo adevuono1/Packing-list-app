@@ -61,6 +61,14 @@
   .sug.on { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
   .tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; }
   .tools button { flex: 1 1 auto; }
+  .cnote { border: 0; border-bottom: 1px dashed var(--line); border-radius: 0; padding: 4px 0; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .bagsec { padding: 8px 0; border-top: 1px solid var(--line); }
+  .bagsec:first-of-type { border-top: 0; }
+  .bagtitle { font-weight: 600; margin-bottom: 4px; }
+  .line { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; padding: 2px 0; }
+  .catname { color: var(--muted); font-size: 12px; }
+  .qtyv { font-variant-numeric: tabular-nums; }
+  .empty { font-size: 13px; color: var(--muted); }
   .hint { font-size: 12px; color: var(--muted); margin-top: 16px; line-height: 1.5; }
 </style>
 </head>
@@ -125,6 +133,7 @@ function normalize(s) {
     i.packed = !!i.packed;
     if (!i.rule && RULE_BY_NAME[i.name]) i.rule = RULE_BY_NAME[i.name];
   }));
+  s.categories.forEach(c => { if (c.note === undefined) c.note = ''; });
   const ropa = s.categories.find(c => c.id === 'ropa');
   if (ropa && !ropa.items.some(i => i.rule === 'chaquetas')) {
     ropa.items.push({ id: uid(), name: 'Chaquetas', split: {}, worn: false, packed: false, rule: 'chaquetas' });
@@ -205,6 +214,7 @@ function render() {
   );
 
   for (const cat of state.categories) app.append(renderCategory(cat));
+  app.append(renderByBag());
 
   app.append(
     el('section', { class: 'card' },
@@ -241,6 +251,9 @@ function renderCategory(cat) {
 
   const list = el('div', { class: 'card' },
     el('h2', { text: cat.name }),
+    el('input', { class: 'cnote', value: cat.note || '', placeholder: 'Descriptor (ej.: ropa de abrigo)', 'aria-label': 'Descriptor de la categoría', onchange: e => {
+      cat.note = e.target.value.trim(); save(); render();
+    }}),
     el('p', { class: 'summary', text: summary })
   );
 
@@ -283,6 +296,30 @@ function renderCategory(cat) {
     el('button', { type: 'submit', text: 'Añadir' })
   ));
   return list;
+}
+
+// Vista por maleta: una subsección por cada maleta con lo que va dentro
+function renderByBag() {
+  const card = el('section', { class: 'card' }, el('h2', { text: 'Por maleta' }));
+  for (const b of bags()) {
+    const lines = [];
+    let sum = 0;
+    for (const cat of state.categories) for (const item of cat.items) {
+      const n = bagCount(item, b);
+      if (n > 0) {
+        sum += n;
+        lines.push(el('div', { class: 'line' },
+          el('span', {}, item.name, el('span', { class: 'catname', text: ` · ${cat.name}` })),
+          el('span', { class: 'qtyv', text: `×${n}` })
+        ));
+      }
+    }
+    card.append(el('div', { class: 'bagsec' },
+      el('div', { class: 'bagtitle', text: `${b} · ${sum}` }),
+      ...(lines.length ? lines : [el('div', { class: 'empty', text: 'Nada asignado todavía' })])
+    ));
+  }
+  return card;
 }
 
 function sugBtn(item) {
