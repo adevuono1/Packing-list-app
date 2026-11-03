@@ -57,6 +57,7 @@
   button.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; font-weight: 600; }
   .tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; }
   .tools button { flex: 1 1 auto; }
+  .sug { font-size: 12px; padding: 6px 8px; white-space: nowrap; color: var(--accent); border-color: var(--accent); background: transparent; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 16px; line-height: 1.5; }
 </style>
 </head>
@@ -103,6 +104,51 @@ function save() {
 
 let state = load();
 
+// Recomendaciones según el número de días
+const RULES = {
+  camisetas:     d => Math.max(0, d - 1),
+  pantalones:    d => Math.ceil(d / 2),
+  ropa_interior: d => d + 1,
+  calcetines:    d => d + 1,
+  pijama:        d => Math.floor(d / 4),
+  chaquetas:     d => Math.ceil(d / 5),
+};
+const RULE_BY_NAME = {
+  'Camisetas': 'camisetas', 'Pantalones': 'pantalones', 'Ropa interior': 'ropa_interior',
+  'Calcetines': 'calcetines', 'Pijama': 'pijama', 'Chaquetas': 'chaquetas'
+};
+
+// Migración: asigna reglas a objetos existentes y añade Chaquetas si falta
+state.categories.forEach(c => c.items.forEach(i => {
+  if (!i.rule && RULE_BY_NAME[i.name]) i.rule = RULE_BY_NAME[i.name];
+}));
+{
+  const ropa = state.categories.find(c => c.id === 'ropa');
+  if (ropa && !ropa.items.some(i => i.rule === 'chaquetas')) {
+    ropa.items.push({ id: uid(), name: 'Chaquetas', qty: 0, where: '', packed: false, rule: 'chaquetas' });
+  }
+}
+
+function daysCount() { return Math.max(0, parseInt(state.trip.days, 10) || 0); }
+function suggestion(item) {
+  const fn = item.rule && RULES[item.rule];
+  return fn ? fn(daysCount()) : null;
+}
+function sugBtn(item) {
+  const s = suggestion(item);
+  if (s === null) return null;
+  return el('button', { class: 'sug', text: `Sugerido ${s}`, onclick: () => {
+    item.qty = s; save(); render();
+  }});
+}
+function applySuggestions() {
+  state.categories.forEach(c => c.items.forEach(i => {
+    const s = suggestion(i);
+    if (s !== null) i.qty = s;
+  }));
+  save(); render();
+}
+
 function el(tag, props = {}, ...kids) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
@@ -135,7 +181,7 @@ function render() {
     el('section', { class: 'card' },
       field('Destino', state.trip.destination, v => { state.trip.destination = v; save(); }, 'text', 'Ej.: Lisboa'),
       el('div', { class: 'row2', style: 'margin-top:10px' },
-        field('Días', state.trip.days, v => { state.trip.days = v; save(); }, 'number'),
+        field('Días', state.trip.days, v => { state.trip.days = v; save(); render(); }, 'number'),
         field('Equipaje', state.trip.luggage, v => { state.trip.luggage = v; save(); }, 'text', 'Ej.: Maleta grande')
       )
     ),
@@ -167,6 +213,7 @@ function render() {
         state.categories.forEach(c => c.items.forEach(i => i.packed = false));
         save(); render();
       }}),
+      el('button', { text: 'Aplicar sugerencias', onclick: applySuggestions }),
       el('button', { text: 'Exportar copia', onclick: exportData }),
       importButton()
     ),
@@ -191,6 +238,7 @@ function renderCategory(cat) {
         el('input', { type: 'number', min: '0', class: 'qty', value: item.qty, 'aria-label': 'Cantidad', style: 'width:64px', onchange: e => {
           item.qty = Math.max(0, parseInt(e.target.value, 10) || 0); save();
         }}),
+        sugBtn(item),
         el('input', { type: 'text', value: item.where, placeholder: 'Dónde (maleta, bolsillo…)', 'aria-label': 'Dónde', onchange: e => {
           item.where = e.target.value; save();
         }})
