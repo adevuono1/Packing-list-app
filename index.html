@@ -32,9 +32,10 @@
   .summary { font-size: 12px; color: var(--muted); margin: 0 0 8px; line-height: 1.5; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
   label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); flex: 1; min-width: 0; }
-  input { font: inherit; color: var(--fg); background: transparent; border: 1px solid var(--line);
+  input, select { font: inherit; color: var(--fg); background: transparent; border: 1px solid var(--line);
     border-radius: 10px; padding: 9px 10px; width: 100%; min-width: 0; }
-  input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+  select { background: var(--card); }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0; }
   .row2 { display: flex; gap: 10px; }
   .row2 label.field:first-child { flex: 0 0 90px; }
   .progress { margin: 4px 0 18px; }
@@ -47,10 +48,9 @@
   .packed .name { text-decoration: line-through; color: var(--muted); }
   .name { border: 0; padding: 4px 0; font-size: 16px; }
   input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent); margin: 0; }
-  .bags { grid-column: 2 / 4; display: flex; flex-wrap: wrap; gap: 8px; }
-  .bagf { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 2px; }
-  .bagf input { width: 84px; padding: 6px 8px; font-size: 14px; text-align: center; }
   .meta { grid-column: 2 / 4; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .meta .qty { width: 72px; padding: 6px 8px; font-size: 14px; text-align: center; }
+  .meta select { width: auto; flex: 1 1 150px; padding: 6px 8px; font-size: 14px; }
   .total { font-size: 13px; color: var(--muted); margin-left: auto; }
   .del { background: none; border: 0; color: var(--danger); font: inherit; font-size: 13px; padding: 4px; }
   form.add { display: flex; gap: 8px; margin-top: 10px; }
@@ -76,13 +76,15 @@
 <main id="app"></main>
 <script>
 const KEY = 'packing-list-v1';
-const DEFAULT_BAGS = ['Carry-on', 'Facturada', 'Personal item'];
+const LOCATIONS = ['Maleta facturada', 'Maleta de mano', 'Objeto personal', 'Otro'];
+const LEGACY_BAG_MAP = { 'Checked': 'Maleta facturada', 'Facturada': 'Maleta facturada',
+  'Carry-on': 'Maleta de mano', 'Personal item': 'Objeto personal' };
 
 let uidCounter = 0;
 function uid() { return 'i' + Date.now().toString(36) + (++uidCounter); }
 
 const seed = {
-  trip: { destination: '', days: 5, bags: [...DEFAULT_BAGS] },
+  trip: { destination: '', days: 5 },
   categories: [
     { id: 'ropa', name: 'Ropa', items: [
       ['Camisetas', 4], ['Pantalones', 3], ['Ropa interior', 6], ['Calcetines', 6],
@@ -99,8 +101,8 @@ const seed = {
       ['Powerbank 20.000 mAh', 1], ['AirPods', 1], ['Sony XM5', 1], ['AirFly', 1],
       ['Báscula de equipaje', 1], ['Adaptador Américas', 1], ['Adaptador Europa', 1]
     ]}
-  ].map(c => ({ id: c.id, name: c.name, items: c.items.map(([name, qty]) => ({
-    id: uid(), name, qty, packed: false, worn: false })) }))
+  ].map(c => ({ id: c.id, name: c.name, note: '', items: c.items.map(([name, qty]) => ({
+    id: uid(), name, qty, where: '', packed: false, worn: false })) }))
 };
 
 // Recomendaciones según el número de días
@@ -120,23 +122,28 @@ const RULE_BY_NAME = {
 // Convierte cualquier estado (nuevo, guardado o importado) al formato actual
 function normalize(s) {
   s.trip = s.trip || {};
-  if (!Array.isArray(s.trip.bags) || !s.trip.bags.length) s.trip.bags = [...DEFAULT_BAGS];
-  const bag0 = s.trip.bags[0];
-  s.categories.forEach(c => c.items.forEach(i => {
-    if (!i.split) {
-      i.split = {};
-      if (i.qty) i.split[bag0] = i.qty;   // datos antiguos: todo va a la primera maleta
-    }
-    delete i.qty;
-    delete i.where;
-    i.worn = !!i.worn;
-    i.packed = !!i.packed;
-    if (!i.rule && RULE_BY_NAME[i.name]) i.rule = RULE_BY_NAME[i.name];
-  }));
-  s.categories.forEach(c => { if (c.note === undefined) c.note = ''; });
+  delete s.trip.bags;
+  s.categories.forEach(c => {
+    if (c.note === undefined) c.note = '';
+    c.items.forEach(i => {
+      if (i.split) {
+        // Formato anterior: cantidades repartidas por maleta
+        const parts = Object.entries(i.split).filter(([, n]) => n > 0);
+        i.qty = parts.reduce((s2, [, n]) => s2 + n, 0);
+        i.where = parts.length ? (LEGACY_BAG_MAP[parts.sort((a, b) => b[1] - a[1])[0][0]] || '') : '';
+        delete i.split;
+      }
+      if (i.where === undefined) i.where = '';
+      if (i.qty === undefined) i.qty = 0;
+      i.qty = Math.max(0, parseInt(i.qty, 10) || 0);
+      i.worn = !!i.worn;
+      i.packed = !!i.packed;
+      if (!i.rule && RULE_BY_NAME[i.name]) i.rule = RULE_BY_NAME[i.name];
+    });
+  });
   const ropa = s.categories.find(c => c.id === 'ropa');
   if (ropa && !ropa.items.some(i => i.rule === 'chaquetas')) {
-    ropa.items.push({ id: uid(), name: 'Chaquetas', split: {}, worn: false, packed: false, rule: 'chaquetas' });
+    ropa.items.push({ id: uid(), name: 'Chaquetas', qty: 0, where: '', packed: false, worn: false, rule: 'chaquetas' });
   }
   return s;
 }
@@ -155,11 +162,8 @@ function save() {
 let state = normalize(load());
 
 // Helpers de cuentas
-function bags() { return state.trip.bags; }
-function bagCount(item, bag) { return Math.max(0, parseInt(item.split?.[bag], 10) || 0); }
-function inBags(item) { return bags().reduce((s, b) => s + bagCount(item, b), 0); }
 function wornUnits(item) { return item.worn ? 1 : 0; }
-function totalOf(item) { return inBags(item) + wornUnits(item); }
+function totalOf(item) { return item.qty + wornUnits(item); }
 function daysCount() { return Math.max(0, parseInt(state.trip.days, 10) || 0); }
 function suggestion(item) {
   const fn = item.rule && RULES[item.rule];
@@ -189,8 +193,8 @@ function render() {
   const app = document.getElementById('app');
   app.replaceChildren();
 
-  // Progreso: solo objetos que van en alguna maleta
-  const all = state.categories.flatMap(c => c.items).filter(i => inBags(i) > 0);
+  // Progreso: solo objetos que van en la maleta (no los puestos)
+  const all = state.categories.flatMap(c => c.items).filter(i => i.qty > 0);
   const done = all.filter(i => i.packed).length;
   const pct = all.length ? Math.round(done / all.length * 100) : 0;
 
@@ -199,12 +203,7 @@ function render() {
     el('section', { class: 'card' },
       field('Destino', state.trip.destination, v => { state.trip.destination = v; save(); }, 'text', 'Ej.: Lisboa'),
       el('div', { class: 'row2', style: 'margin-top:10px' },
-        field('Días', state.trip.days, v => { state.trip.days = v; save(); render(); }, 'number'),
-        field('Maletas', bags().join(', '), v => {
-          const arr = v.split(',').map(s => s.trim()).filter(Boolean);
-          state.trip.bags = arr.length ? arr : [...DEFAULT_BAGS];
-          save(); render();
-        }, 'text', 'Carry-on, Facturada…')
+        field('Días', state.trip.days, v => { state.trip.days = v; save(); render(); }, 'number')
       )
     ),
     el('div', { class: 'progress' },
@@ -223,7 +222,7 @@ function render() {
         e.preventDefault();
         const name = e.target.elements.name.value.trim();
         if (!name) return;
-        state.categories.push({ id: uid(), name, items: [] });
+        state.categories.push({ id: uid(), name, note: '', items: [] });
         save(); render();
       }},
         el('input', { name: 'name', placeholder: 'Ej.: Documentos', 'aria-label': 'Nombre de la categoría' }),
@@ -244,7 +243,7 @@ function render() {
 }
 
 function renderCategory(cat) {
-  const counts = bags().map(b => `${b} ${cat.items.reduce((s, i) => s + bagCount(i, b), 0)}`);
+  const counts = LOCATIONS.map(l => `${l} ${cat.items.filter(i => i.where === l).reduce((s, i) => s + i.qty, 0)}`);
   const worn = cat.items.filter(i => i.worn).length;
   const total = cat.items.reduce((s, i) => s + totalOf(i), 0);
   const summary = [...counts, ...(worn ? [`Puestas ${worn}`] : []), `Total ${total}`].join(' · ');
@@ -258,6 +257,14 @@ function renderCategory(cat) {
   );
 
   for (const item of cat.items) {
+    const select = el('select', { 'aria-label': `Dónde está ${item.name}`, onchange: e => {
+      item.where = e.target.value; save(); render();
+    }},
+      el('option', { value: '', text: 'Dónde…' }),
+      ...LOCATIONS.map(l => el('option', { value: l, text: l }))
+    );
+    select.value = item.where;
+
     const row = el('div', { class: 'item' + (item.packed ? ' packed' : '') },
       el('input', { type: 'checkbox', checked: item.packed, 'aria-label': 'Empaquetado', onchange: e => {
         item.packed = e.target.checked; save(); render();
@@ -268,15 +275,11 @@ function renderCategory(cat) {
       el('button', { class: 'del', text: 'Borrar', onclick: () => {
         cat.items = cat.items.filter(i => i !== item); save(); render();
       }}),
-      el('div', { class: 'bags' }, ...bags().map(b =>
-        el('label', { class: 'bagf' }, b,
-          el('input', { type: 'number', min: '0', value: bagCount(item, b), 'aria-label': `${item.name} en ${b}`, onchange: e => {
-            item.split = { ...(item.split || {}), [b]: Math.max(0, parseInt(e.target.value, 10) || 0) };
-            save(); render();
-          }})
-        )
-      )),
       el('div', { class: 'meta' },
+        el('input', { type: 'number', min: '0', class: 'qty', value: item.qty, 'aria-label': 'Cantidad', onchange: e => {
+          item.qty = Math.max(0, parseInt(e.target.value, 10) || 0); save(); render();
+        }}),
+        select,
         sugBtn(item),
         cat.id === 'ropa' ? wornBtn(item) : null,
         el('span', { class: 'total', text: `Total ${totalOf(item)}` })
@@ -289,7 +292,7 @@ function renderCategory(cat) {
     e.preventDefault();
     const name = e.target.elements.name.value.trim();
     if (!name) return;
-    cat.items.push({ id: uid(), name, split: {}, worn: false, packed: false });
+    cat.items.push({ id: uid(), name, qty: 1, where: '', packed: false, worn: false });
     save(); render();
   }},
     el('input', { name: 'name', placeholder: 'Añadir objeto', 'aria-label': 'Añadir objeto' }),
@@ -298,24 +301,25 @@ function renderCategory(cat) {
   return list;
 }
 
-// Vista por maleta: una subsección por cada maleta con lo que va dentro
+// Vista por maleta: una subsección por cada opción de "Dónde"
 function renderByBag() {
   const card = el('section', { class: 'card' }, el('h2', { text: 'Por maleta' }));
-  for (const b of bags()) {
+  const groups = [...LOCATIONS, ''];
+  for (const loc of groups) {
     const lines = [];
     let sum = 0;
     for (const cat of state.categories) for (const item of cat.items) {
-      const n = bagCount(item, b);
-      if (n > 0) {
-        sum += n;
+      if (item.where === loc && item.qty > 0) {
+        sum += item.qty;
         lines.push(el('div', { class: 'line' },
           el('span', {}, item.name, el('span', { class: 'catname', text: ` · ${cat.name}` })),
-          el('span', { class: 'qtyv', text: `×${n}` })
+          el('span', { class: 'qtyv', text: `×${item.qty}` })
         ));
       }
     }
+    if (loc === '' && !lines.length) continue;
     card.append(el('div', { class: 'bagsec' },
-      el('div', { class: 'bagtitle', text: `${b} · ${sum}` }),
+      el('div', { class: 'bagtitle', text: `${loc || 'Sin dónde'} · ${sum}` }),
       ...(lines.length ? lines : [el('div', { class: 'empty', text: 'Nada asignado todavía' })])
     ));
   }
@@ -326,7 +330,7 @@ function sugBtn(item) {
   const s = suggestion(item);
   if (s === null) return null;
   return el('button', { class: 'sug', text: `Sugerido ${s}`, onclick: () => {
-    item.split = { [bags()[0]]: Math.max(0, s - wornUnits(item)) };
+    item.qty = Math.max(0, s - wornUnits(item));
     save(); render();
   }});
 }
@@ -340,7 +344,7 @@ function wornBtn(item) {
 function applySuggestions() {
   state.categories.forEach(c => c.items.forEach(i => {
     const s = suggestion(i);
-    if (s !== null) i.split = { [bags()[0]]: Math.max(0, s - wornUnits(i)) };
+    if (s !== null) i.qty = Math.max(0, s - wornUnits(i));
   }));
   save(); render();
 }
